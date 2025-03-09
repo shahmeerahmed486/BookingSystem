@@ -1,15 +1,23 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel, EmailStr
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 import pika
 import json
 import threading
 
 app = FastAPI()
+
+# Add CORS middleware to allow requests from your front end
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # MongoDB Connection
 MONGO_URI = "mongodb://localhost:27018/"
@@ -21,11 +29,11 @@ notifications_collection = db.notifications
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USER = "devops.shahmeer.danish@gmail.com"
-EMAIL_PASS = "lpayxuwterfmqjix"
+EMAIL_PASS = "lpayxuwterfmqjix"  # (ensure this is secured)
 
-# RabbitMQ Connection
+# RabbitMQ Connection Settings
 RABBITMQ_HOST = "localhost"
-QUEUE_NAME = "notification_queue"
+QUEUE_NAME = "booking_notifications"
 
 # Function to send email
 def send_email(recipient: str, subject: str, message: str):
@@ -48,10 +56,8 @@ def send_email(recipient: str, subject: str, message: str):
 # RabbitMQ Consumer Function
 def callback(ch, method, properties, body):
     try:
-        # Decode the message
         notification_data = json.loads(body.decode("utf-8"))
-
-        # Extract email details
+        
         recipient = notification_data["recipient"]
         subject = notification_data["subject"]
         message = notification_data["message"]
@@ -63,9 +69,10 @@ def callback(ch, method, properties, body):
         send_email(recipient, subject, message)
 
         print(f"📩 Notification processed for {recipient}")
-
+    
     except Exception as e:
         print(f"❌ Error processing message: {e}")
+
 
 # Function to Start RabbitMQ Consumer in a Background Thread
 def start_rabbitmq_consumer():
@@ -75,7 +82,7 @@ def start_rabbitmq_consumer():
         channel.queue_declare(queue=QUEUE_NAME, durable=True)
         
         channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback, auto_ack=True)
-
+        
         print("🐇 RabbitMQ Consumer Started. Listening for messages...")
         channel.start_consuming()
     
@@ -95,3 +102,24 @@ def get_notifications():
 @app.get("/health/")
 def health_check():
     return {"status": "Notification Service is running"}
+
+# API to send notification directly
+@app.post("/send-notification/")
+def send_notification(notification: dict):
+    try:
+        recipient = notification.get("recipient")
+        subject = notification.get("subject")
+        message = notification.get("message")
+        
+        if not recipient or not subject or not message:
+            raise HTTPException(status_code=400, detail="Missing required fields")
+        
+        # Send email directly
+        send_email(recipient, subject, message)
+        
+        # Store in MongoDB
+        notifications_collection.insert_one(notification)
+        
+        return {"status": "Notification sent successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

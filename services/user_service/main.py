@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 from models import User
@@ -11,6 +12,15 @@ Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI
 app = FastAPI()
+
+# Add CORS middleware to allow requests from your front end
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ✅ Root endpoint to verify service is running
 @app.get("/")
@@ -48,6 +58,14 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 @app.get("/profile", response_model=UserResponse)
 def get_profile(email: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+# Get user details by user_id
+@app.get("/users/{user_id}", response_model=UserResponse)
+def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
